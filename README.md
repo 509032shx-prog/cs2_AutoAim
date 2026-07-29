@@ -8,7 +8,7 @@
 
 ### 🎯 方式一：解压即用（推荐，给朋友/测试）
 
-[📥 下载便携版 (v1.0.0)](https://github.com/509032shx-prog/cs2_AutoAim/releases/download/v1.0.0/cs2_AotoAim_便携版.7z)
+[📥 下载便携版 (v1.0.0)](https://github.com/509032shx-prog/cs2_AutoAim/releases/download/v1.0.0/cs2_AotoAim_.7z)
 
 ```
 1. 下载上面的 .7z 文件（约 1.9GB）
