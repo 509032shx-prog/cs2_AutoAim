@@ -1,0 +1,25 @@
+# CS2 AutoAim - Python Dependencies
+# =====================================
+# 安装: pip install -r requirements.txt
+
+# === 图像 / 屏幕捕获 ===
+opencv-python>=4.8.0,<4.12.0
+Pillow>=10.0.0,<12.0.0
+
+# === Windows Mouse/Window API ===
+pywin32>=306
+
+# === 通用 ===
+numpy>=1.24.0,<2.0.0
+psutil>=5.9.0
+tqdm>=4.66.0
+
+# === ONNX Runtime (GPU 推理) ===
+# 版本 1.21.0 兼容 CUDA 12.x (12.1~12.8)
+# onnxruntime-gpu 自带 CUDA/CuDNN DLLs
+# 只需要: NVIDIA 驱动 >= 525, CUDA Toolkit >= 12.1
+onnxruntime-gpu==1.21.0
+onnx>=1.16.0,<1.18.0
+
+# === Ultralytics (导出模型 + 训练) ===
+ultralytics>=8.4.0,<8.6.0
