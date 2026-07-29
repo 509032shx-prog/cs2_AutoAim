@@ -6,10 +6,12 @@
 
 ## 🚀 两种部署方式
 
-### 🎯 方式一：解压即用（给朋友/测试）
+### 🎯 方式一：解压即用（推荐，给朋友/测试）
+
+[📥 下载便携版 (v1.0.0)](https://github.com/509032shx-prog/cs2_AutoAim/releases/download/v1.0.0/cs2_AotoAim_便携版.7z)
 
 ```
-1. 从 GitHub Releases 下载 cs2_AotoAim_便携版.7z (约 1.9GB)
+1. 下载上面的 .7z 文件（约 1.9GB）
 2. 解压到任意目录
 3. 双击「开始运行.bat」或「开始运行+自瞄.bat」
 4. 开干 ✅
