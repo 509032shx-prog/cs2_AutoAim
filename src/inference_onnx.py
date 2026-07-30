@@ -27,10 +27,16 @@ import onnxruntime as ort
 import win32api
 
 from src.screen_capture import get_screen, get_window, get_monitor
+from src.hud import hud_start, hud_update, hud_stop
 
 # 鼠标侧键虚拟键码
 VK_XBUTTON1 = 0x05   # 侧后键 (鼠标4键)
 VK_XBUTTON2 = 0x06   # 侧前键 (鼠标5键)
+
+# 键盘虚拟键码
+VK_Q = 0x51
+VK_F3 = 0x72
+VK_F8 = 0x77
 
 
 class ONNXDetector:
@@ -274,16 +280,24 @@ def main():
         else:
             frame_gen = get_monitor(args.monitor)
 
+        hud_start()
+        time.sleep(0.3)
+
         fps_history = []
         prev_time = time.perf_counter()
+        t_start = time.perf_counter()
+        last_hud = 0
+        frame_count = 0
+        f3_prev = False
 
         print("🎮 开始推理")
         print("   按住 [鼠标侧后键] = 自瞄 (松开停止)")
-        print("   Q=退出  F3=切换持续自瞄")
+        print("   Q=退出  F3=切换持续自瞄  F8=退出")
         if aim_always_on:
             print("   🎯 持续自瞄模式已开启")
         print()
         for frame in frame_gen:
+            frame_count += 1
             t0 = time.perf_counter()
             boxes, scores, class_ids = detector.detect(frame)
             t_infer = (time.perf_counter() - t0) * 1000
@@ -301,10 +315,9 @@ def main():
                     dy = target[1] - crosshair[1]
                     aim_controller.move_smooth(dx, dy)
 
-            frame = draw_detections(frame, boxes, scores, class_ids,
-                                    names, crosshair_pos=crosshair)
-
-            if args.show_fps:
+            # --- HUD 更新 (每 100ms) ---
+            now = time.perf_counter()
+            if now - last_hud > 0.1:
                 curr = time.perf_counter()
                 fps = 1.0 / (curr - prev_time)
                 prev_time = curr
@@ -313,30 +326,38 @@ def main():
                     fps_history.pop(0)
                 avg_fps = sum(fps_history) / max(len(fps_history), 1)
 
-                cv2.putText(frame, f"FPS: {fps:.0f} (avg: {avg_fps:.0f})",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.putText(frame, f"Infer: {t_infer:.1f}ms | Det: {len(boxes)}",
-                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                total_fps = frame_count / (now - t_start)
 
-                if side_held or aim_always_on:
-                    status = "AIM" if side_held else "AUTO"
-                    color = (0, 0, 255) if side_held else (0, 165, 255)
-                    cv2.putText(frame, status, (w - 100, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                # 统计 head 数量
+                n_heads = sum(1 for c in class_ids if c == 1)
+                n_persons = sum(1 for c in class_ids if c == 0)
 
-            scale = min(1.0, 1280 / w)
-            show = cv2.resize(frame, (int(w * scale), int(h * scale)))
-            cv2.imshow("CS2 Aimbot - ONNX", show)
+                if side_held and not aim_always_on:
+                    aim_status = "▶ AIMING"
+                elif aim_always_on:
+                    aim_status = "◉ AUTO AIM"
+                else:
+                    aim_status = "○ idle"
 
-            key = cv2.waitKeyEx(1)
-            if key == ord('q'):
+                hud_update([
+                    f"FPS: {fps:4.0f} (avg {avg_fps:3.0f}) | {aim_status}",
+                    f"Infer: {t_infer:.1f}ms | Found: {n_persons}P + {n_heads}H",
+                    f"Total: {frame_count} frames | side={side_held}",
+                ])
+                last_hud = now
+
+            # --- 键盘检测 ---
+            if win32api.GetAsyncKeyState(VK_Q) < 0 or win32api.GetAsyncKeyState(VK_F8) < 0:
                 break
-            elif key == 0x72:  # F3 key (VK_F3)
+
+            f3_now = win32api.GetAsyncKeyState(VK_F3) < 0
+            if f3_now and not f3_prev:
                 aim_always_on = not aim_always_on
                 aim_controller.reset()
                 print(f"  F3 持续自瞄: {'ON' if aim_always_on else 'OFF (鼠标侧键触发)'}")
+            f3_prev = f3_now
 
-        cv2.destroyAllWindows()
+        hud_stop()
 
     elif args.source.isdigit():
         cap = cv2.VideoCapture(int(args.source))
