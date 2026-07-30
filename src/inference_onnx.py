@@ -131,11 +131,7 @@ class ONNXDetector:
         boxes 已经是归一化坐标 (0~640), 需要缩放回原图
         """
         pad_h, pad_w, ratio, h0, w0 = self._letterbox
-        pred = output[0]  # may be (300,6) or (6,300)
-        if pred.shape[1] == 6:
-            pred = pred  # (N, 6) OK
-        else:
-            pred = pred.T  # (6, N) -> (N, 6)
+        pred = output[0]  # (300, 6)
 
         # 过滤低置信度
         mask = pred[:, 4] >= self.conf_thres
@@ -166,7 +162,7 @@ class ONNXDetector:
         """
         blob = self.preprocess(img)
         outputs = self.session.run(None, {self.input_name: blob})
-        return self.postprocess(outputs)
+        return self.postprocess(outputs[0])
 
 
 # ============================================================
