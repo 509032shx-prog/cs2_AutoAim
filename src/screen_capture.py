@@ -1,47 +1,61 @@
 # -*- coding: utf-8 -*-
 """
-Screen / Window Capture Utilities
-==================================
-Supports: full screen, specific window, monitor region
+Screen / Window Capture Utilities (DXCam - D3D11)
+====================================================
+D3D11 capture → ~240 FPS, ~0.5ms grab vs ImageGrab's 50-200ms
 """
 
 import numpy as np
 import cv2
-from PIL import ImageGrab
 import win32gui
 import win32con
 from typing import Optional, Tuple, Generator
 
+import dxcam
+
 
 def get_screen(region: Optional[Tuple[int, int, int, int]] = None) -> Generator[np.ndarray, None, None]:
     """
-    实时捕获屏幕
+    DXCam 屏幕捕获
     Args:
         region: (left, top, right, bottom) 或 None(全屏)
     Yields:
         BGR numpy array (H, W, 3)
     """
-    while True:
-        img = ImageGrab.grab(bbox=region, all_screens=True)
-        frame = np.array(img)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        yield frame
+    camera = dxcam.create(output_idx=0, output_color="BGR")
+    if camera is None:
+        raise RuntimeError("DXCam 初始化失败, 检查 D3D11 驱动")
+
+    if region:
+        left, top, right, bottom = region
+        camera.start(region=(left, top, right, bottom), target_fps=240, video_mode=True)
+    else:
+        camera.start(target_fps=240, video_mode=True)
+
+    try:
+        while True:
+            frame = camera.get_latest_frame()
+            if frame is not None:
+                if frame.shape[2] == 4:
+                    frame = frame[:, :, :3]
+                yield frame
+    finally:
+        camera.stop()
 
 
 def get_window(window_name: str) -> Generator[np.ndarray, None, None]:
     """
-    捕获指定窗口
-    Args:
-        window_name: 窗口标题 (支持部分匹配)
-    Yields:
-        BGR numpy array (H, W, 3)
+    捕获指定窗口 (DXCam)
+
+    优化策略:
+    - 每 60 帧更新一次窗口位置 (应对窗口拖动)
+    - 窗口最小化时 fallback 全屏
     """
-    # 先查找窗口
     def enum_callback(hwnd, windows):
         if win32gui.IsWindowVisible(hwnd):
             title = win32gui.GetWindowText(hwnd)
             if window_name.lower() in title.lower():
-                windows.append((hwnd, title))
+                windows.append(hwnd)
 
     windows = []
     win32gui.EnumWindows(enum_callback, windows)
@@ -51,71 +65,84 @@ def get_window(window_name: str) -> Generator[np.ndarray, None, None]:
         yield from get_screen()
         return
 
-    hwnd, title = windows[0]
+    hwnd = windows[0]
+    title = win32gui.GetWindowText(hwnd)
     print(f"✅ 找到窗口: {title} (hwnd={hwnd})")
 
-    while True:
-        try:
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            
-            # 跳过最小化窗口
-            if right - left <= 0 or bottom - top <= 0:
+    camera = dxcam.create(output_idx=0, output_color="BGR")
+    if camera is None:
+        print("⚠️  DXCam 失败, 回退 PIL (慢)")
+        # Fallback: use PIL ImageGrab
+        from PIL import ImageGrab
+        while True:
+            try:
+                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                if right - left > 0 and bottom - top > 0:
+                    img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+                    yield cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            except Exception:
                 yield from get_screen()
                 return
+        return
 
-            img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
-            frame = np.array(img)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            yield frame
-        except Exception as e:
-            print(f"⚠️  窗口捕获异常: {e}, 切换到全屏")
-            yield from get_screen()
-            return
+    frame_idx = 0
+    camera.start(target_fps=240, video_mode=True)
+
+    try:
+        while True:
+            # 每 60 帧刷新窗口位置
+            if frame_idx % 60 == 0:
+                try:
+                    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                    w, h = right - left, bottom - top
+                    if w <= 0 or h <= 0:
+                        raise ValueError("Window minimized")
+                    camera.stop()
+                    camera.start(region=(left, top, right, bottom), target_fps=240, video_mode=True)
+                except Exception:
+                    # 窗口失效, 切全屏
+                    camera.stop()
+                    yield from get_screen()
+                    return
+
+            frame = camera.get_latest_frame()
+            if frame is not None:
+                if frame.shape[2] == 4:
+                    frame = frame[:, :, :3]
+                yield frame
+
+            frame_idx += 1
+    finally:
+        camera.stop()
 
 
 def get_monitor(monitor_index: int = 0) -> Generator[np.ndarray, None, None]:
-    """
-    捕获指定显示器
-    Args:
-        monitor_index: 显示器索引 (0=主显示器)
-    """
-    import ctypes
-    from ctypes import wintypes
+    """捕获指定显示器 (DXCam)"""
+    camera = dxcam.create(output_idx=monitor_index, output_color="BGR")
+    if camera is None:
+        raise RuntimeError(f"DXCam 初始化显示器 {monitor_index} 失败")
 
-    user32 = ctypes.windll.user32
+    print(f"✅ 显示器 {monitor_index}: DXCam D3D11 模式 ({camera.width}x{camera.height})")
+    camera.start(target_fps=240, video_mode=True)
 
-    monitors = []
-
-    def monitor_enum_proc(hMonitor, hdcMonitor, lprcMonitor, dwData):
-        rect = lprcMonitor.contents
-        monitors.append((rect.left, rect.top, rect.right, rect.bottom))
-        return True
-
-    MonitorEnumProc = ctypes.WINFUNCTYPE(
-        ctypes.c_bool,
-        ctypes.c_ulonglong,
-        ctypes.c_ulonglong,
-        ctypes.POINTER(wintypes.RECT),
-        ctypes.c_double,
-    )
-    user32.EnumDisplayMonitors(0, 0, MonitorEnumProc(monitor_enum_proc), 0)
-
-    if monitor_index >= len(monitors):
-        print(f"⚠️  显示器 {monitor_index} 不存在, 使用主显示器")
-        monitor_index = 0
-
-    region = monitors[monitor_index]
-    print(f"✅ 显示器 {monitor_index}: {region[2]-region[0]}x{region[3]-region[1]} "
-          f"@ ({region[0]}, {region[1]})")
-    yield from get_screen(region=region)
+    try:
+        while True:
+            frame = camera.get_latest_frame()
+            if frame is not None:
+                # 确保 BGR 3 通道 (dxcam 可能返回 BGRA)
+                if frame.shape[2] == 4:
+                    frame = frame[:, :, :3]
+                yield frame
+    finally:
+        camera.stop()
 
 
 if __name__ == "__main__":
-    """Test screen capture"""
-    print("测试屏幕捕获 (按 Q 退出)")
+    """Test"""
+    print("测试 DXCam 屏幕捕获")
     print("1: 全屏")
-    print("2: 窗口 (输入窗口名)")
-    print("3: 指定显示器")
+    print("2: 窗口")
+    print("3: 显示器")
 
     choice = input("选择: ").strip()
 
@@ -130,12 +157,11 @@ if __name__ == "__main__":
 
     for frame in gen:
         h, w = frame.shape[:2]
-        # 限制显示大小
         scale = min(1.0, 1280 / w)
         display = cv2.resize(frame, (int(w * scale), int(h * scale)))
-        cv2.putText(display, f"{w}x{h}", (10, 30),
+        cv2.putText(display, f"{w}x{h} DXCam", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.imshow("Screen Capture", display)
+        cv2.imshow("Screen Capture - DXCam", display)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
