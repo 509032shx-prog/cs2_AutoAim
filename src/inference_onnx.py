@@ -315,6 +315,8 @@ def main():
         print()
         for frame in frame_gen:
             frame_count += 1
+            t_loop_start = time.perf_counter()
+
             t0 = time.perf_counter()
             boxes, scores, class_ids, (t_prep, t_inf, t_post) = detector.detect_timed(frame)
             t_total = (time.perf_counter() - t0) * 1000
@@ -332,20 +334,18 @@ def main():
                     dy = target[1] - crosshair[1]
                     aim_controller.move_smooth(dx, dy)
 
-            # --- HUD 更新 (每 100ms) ---
+            # --- 实时 FPS 计算 ---
             now = time.perf_counter()
+            dt = (now - prev_time) * 1000  # ms since last frame
+            prev_time = now
+            fps = 1000.0 / dt if dt > 0 else 0
+            fps_history.append(fps)
+            if len(fps_history) > 100:
+                fps_history.pop(0)
+            avg_fps = sum(fps_history) / max(len(fps_history), 1)
+
+            # --- HUD 更新 (每 100ms) ---
             if now - last_hud > 0.1:
-                curr = time.perf_counter()
-                fps = 1.0 / (curr - prev_time)
-                prev_time = curr
-                fps_history.append(fps)
-                if len(fps_history) > 100:
-                    fps_history.pop(0)
-                avg_fps = sum(fps_history) / max(len(fps_history), 1)
-
-                total_fps = frame_count / (now - t_start)
-
-                # 统计 head 数量
                 n_heads = sum(1 for c in class_ids if c == 1)
                 n_persons = sum(1 for c in class_ids if c == 0)
 
@@ -357,14 +357,14 @@ def main():
                     aim_status = "○ idle"
 
                 hud_update([
-                    f"FPS: {fps:4.0f} (avg {avg_fps:3.0f}) | {aim_status}",
+                    f"FPS: {avg_fps:5.0f} | Frame: {dt:5.1f}ms | {aim_status}",
                     f"Prep:{t_prep:5.1f} Inf:{t_inf:4.1f} Post:{t_post:4.1f}ms",
                     f"Total:{t_total:5.1f}ms | {n_persons}P + {n_heads}H",
                 ])
-                
-                # 首次打印到控制台方便截图
-                if frame_count < 20 and frame_count % 10 == 0:
-                    print(f"[诊断#{frame_count}] Prep:{t_prep:.1f}ms  Inf:{t_inf:.1f}ms  Post:{t_post:.1f}ms  Total:{t_total:.1f}ms")
+
+                # 打印到控制台
+                if frame_count <= 30 and frame_count % 15 == 0:
+                    print(f"[诊断#{frame_count}] FPS:{avg_fps:.0f}  Frame:{dt:.1f}ms  Prep:{t_prep:.1f}ms  Inf:{t_inf:.1f}ms  Post:{t_post:.1f}ms  Total:{t_total:.1f}ms")
 
                 last_hud = now
 
