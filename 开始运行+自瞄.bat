@@ -3,7 +3,6 @@ chcp 65001 >nul
 title CS2 AutoAim + Auto
 set PYTHONIOENCODING=utf-8
 
-REM ==========================================
 set "APP_DIR=%~dp0"
 set "APP_DIR=%APP_DIR:~0,-1%"
 set "PYTHONHOME=%APP_DIR%\venv"
@@ -21,7 +20,7 @@ if not exist "%PYTHON%" (
 )
 
 if not exist "%APP_DIR%\models\cs2_best.onnx" (
-    echo [X] Model not found (models\cs2_best.onnx)
+    echo [X] Model not found: models\cs2_best.onnx
     pause
     exit /b 1
 )
@@ -29,7 +28,7 @@ if not exist "%APP_DIR%\models\cs2_best.onnx" (
 cd /d "%APP_DIR%"
 echo.
 echo ============================================
-echo   CS2 AutoAim - Auto-aim mode (F3 to toggle)
+echo   CS2 AutoAim - Auto-aim mode - F3 to toggle
 echo ============================================
 echo.
 "%PYTHON%" src/inference_onnx.py --aimbot %*
