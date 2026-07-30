@@ -344,6 +344,10 @@ def main():
                 fps_history.pop(0)
             avg_fps = sum(fps_history) / max(len(fps_history), 1)
 
+            # 每帧打印到控制台 (前 5 帧)
+            if frame_count <= 5:
+                print(f"[F#{frame_count}] dt={dt:.1f}ms  fps={fps:.0f}  prep={t_prep:.1f}ms  inf={t_inf:.1f}ms  post={t_post:.1f}ms  total={t_total:.1f}ms")
+
             # --- HUD 更新 (每 100ms) ---
             if now - last_hud > 0.1:
                 n_heads = sum(1 for c in class_ids if c == 1)
@@ -357,15 +361,10 @@ def main():
                     aim_status = "○ idle"
 
                 hud_update([
-                    f"FPS: {avg_fps:5.0f} | Frame: {dt:5.1f}ms | {aim_status}",
+                    f"FPS: {avg_fps:5.0f} | dt: {dt:5.1f}ms | {aim_status}",
                     f"Prep:{t_prep:5.1f} Inf:{t_inf:4.1f} Post:{t_post:4.1f}ms",
                     f"Total:{t_total:5.1f}ms | {n_persons}P + {n_heads}H",
                 ])
-
-                # 打印到控制台
-                if frame_count <= 30 and frame_count % 15 == 0:
-                    print(f"[诊断#{frame_count}] FPS:{avg_fps:.0f}  Frame:{dt:.1f}ms  Prep:{t_prep:.1f}ms  Inf:{t_inf:.1f}ms  Post:{t_post:.1f}ms  Total:{t_total:.1f}ms")
-
                 last_hud = now
 
             # --- 键盘检测 ---
