@@ -41,7 +41,7 @@ VK_F8 = 0x77
 
 class ONNXDetector:
     """
-    YOLO 检测器 (ONNX Runtime)
+    YOLO 检测器 (ONNX Runtime + TensorRT)
     
     模型格式: end2end (含NMS), output=(1, 300, 6)
     每行: [x1, y1, x2, y2, confidence, class_id]
@@ -52,34 +52,70 @@ class ONNXDetector:
         model_path: str,
         imgsz: int = 640,
         conf_thres: float = 0.25,
-        fp32_input: bool = True,  # ONNX input is float32
+        use_tensorrt: bool = True,
+        cache_dir: str = None,
     ):
         self.imgsz = imgsz
         self.conf_thres = conf_thres
 
-        # 初始化 ONNX Runtime
-        providers = [
-            ("CUDAExecutionProvider", {
-                "device_id": 0,
-                "arena_extend_strategy": "kNextPowerOfTwo",
-                "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
-                "cudnn_conv_algo_search": "EXHAUSTIVE",
-            }),
-            "CPUExecutionProvider",
-        ]
+        if cache_dir is None:
+            cache_dir = str(Path(model_path).parent / "trt_cache")
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        # 配置 providers，TensorRT 优先
+        config_options = {}
+        
+        if use_tensorrt and 'TensorrtExecutionProvider' in ort.get_available_providers():
+            # ONNX Runtime TensorRT 配置
+            providers = [
+                ("TensorrtExecutionProvider", {
+                    "device_id": 0,
+                    "trt_fp16_enable": "1",
+                    "trt_engine_cache_enable": "1",
+                    "trt_engine_cache_path": cache_dir,
+                    "trt_max_workspace_size": str(2 * 1024 * 1024 * 1024),
+                    "trt_builder_optimization_level": "5",
+                    "trt_timing_cache_enable": "1",
+                    "trt_timing_cache_path": cache_dir,
+                }),
+                ("CUDAExecutionProvider", {
+                    "device_id": 0,
+                    "arena_extend_strategy": "kNextPowerOfTwo",
+                    "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
+                }),
+                "CPUExecutionProvider",
+            ]
+            self._engine_name = "TensorRT (FP16)"
+            print("🚀 使用 TensorRT (FP16) 引擎, 首次运行需要编译 1-3 分钟...")
+        else:
+            providers = [
+                ("CUDAExecutionProvider", {
+                    "device_id": 0,
+                    "arena_extend_strategy": "kNextPowerOfTwo",
+                    "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
+                    "cudnn_conv_algo_search": "EXHAUSTIVE",
+                }),
+                "CPUExecutionProvider",
+            ]
+            self._engine_name = "CUDA"
 
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         opts.intra_op_num_threads = 4
 
+        t0 = time.perf_counter()
         self.session = ort.InferenceSession(model_path, opts, providers=providers)
+        t_load = time.perf_counter() - t0
+        
         self.input_name = self.session.get_inputs()[0].name
-
+        actual_providers = self.session.get_providers()
+        print(f"  引擎: {self._engine_name} → 实际: {actual_providers} ({t_load:.1f}s)")
+        
         outputs = self.session.get_outputs()
-        print(f"  ONNX input:  {self.session.get_inputs()[0].name} "
+        print(f"  输入: {self.session.get_inputs()[0].name} "
               f"shape={self.session.get_inputs()[0].shape}")
         for o in outputs:
-            print(f"  ONNX output: {o.name} shape={o.shape}")
+            print(f"  输出: {o.name} shape={o.shape}")
 
         self.warmup_done = False
 
@@ -264,6 +300,8 @@ def main():
     parser.add_argument("--aim-min-conf", type=float, default=0.4)
     parser.add_argument("--show-fps", action="store_true", default=True)
     parser.add_argument("--no-warmup", action="store_true")
+    parser.add_argument("--no-tensorrt", action="store_true",
+                        help="禁用 TensorRT, 使用 CUDA")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -275,7 +313,8 @@ def main():
         print(f"❌ 模型不存在: {model_path}")
         sys.exit(1)
 
-    detector = ONNXDetector(str(model_path), imgsz=args.img_size)
+    detector = ONNXDetector(str(model_path), imgsz=args.img_size,
+                            use_tensorrt=not args.no_tensorrt)
     print(f"🎯 执行引擎: {detector.session.get_providers()}")
 
     if not args.no_warmup:
