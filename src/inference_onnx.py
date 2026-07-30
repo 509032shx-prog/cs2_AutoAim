@@ -170,6 +170,22 @@ class ONNXDetector:
         outputs = self.session.run(None, {self.input_name: blob})
         return self.postprocess(outputs[0])
 
+    def detect_timed(self, img: np.ndarray):
+        """检测 + 耗时统计"""
+        t0 = time.perf_counter()
+        blob = self.preprocess(img)
+        t_prep = (time.perf_counter() - t0) * 1000
+
+        t1 = time.perf_counter()
+        outputs = self.session.run(None, {self.input_name: blob})
+        t_inf = (time.perf_counter() - t1) * 1000
+
+        t2 = time.perf_counter()
+        boxes, scores, class_ids = self.postprocess(outputs[0])
+        t_post = (time.perf_counter() - t2) * 1000
+
+        return boxes, scores, class_ids, (t_prep, t_inf, t_post)
+
 
 # ============================================================
 # 绘制函数
@@ -260,6 +276,7 @@ def main():
         sys.exit(1)
 
     detector = ONNXDetector(str(model_path), imgsz=args.img_size)
+    print(f"🎯 执行引擎: {detector.session.get_providers()}")
 
     if not args.no_warmup:
         print("🔥 GPU 预热中...")
@@ -299,8 +316,8 @@ def main():
         for frame in frame_gen:
             frame_count += 1
             t0 = time.perf_counter()
-            boxes, scores, class_ids = detector.detect(frame)
-            t_infer = (time.perf_counter() - t0) * 1000
+            boxes, scores, class_ids, (t_prep, t_inf, t_post) = detector.detect_timed(frame)
+            t_total = (time.perf_counter() - t0) * 1000
 
             h, w = frame.shape[:2]
             crosshair = (w // 2, h // 2)
@@ -341,9 +358,14 @@ def main():
 
                 hud_update([
                     f"FPS: {fps:4.0f} (avg {avg_fps:3.0f}) | {aim_status}",
-                    f"Infer: {t_infer:.1f}ms | Found: {n_persons}P + {n_heads}H",
-                    f"Total: {frame_count} frames | side={side_held}",
+                    f"Prep:{t_prep:5.1f} Inf:{t_inf:4.1f} Post:{t_post:4.1f}ms",
+                    f"Total:{t_total:5.1f}ms | {n_persons}P + {n_heads}H",
                 ])
+                
+                # 首次打印到控制台方便截图
+                if frame_count < 20 and frame_count % 10 == 0:
+                    print(f"[诊断#{frame_count}] Prep:{t_prep:.1f}ms  Inf:{t_inf:.1f}ms  Post:{t_post:.1f}ms  Total:{t_total:.1f}ms")
+
                 last_hud = now
 
             # --- 键盘检测 ---
